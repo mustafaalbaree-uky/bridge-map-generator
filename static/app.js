@@ -191,6 +191,7 @@ function onDone(jobId) {
   setProgress(1, 1, "done");
   $("download").href = `/download/${jobId}`;
   $("result").classList.remove("hidden");
+  loadJobs();
 }
 
 $("confirm").addEventListener("click", async () => {
@@ -201,6 +202,7 @@ $("confirm").addEventListener("click", async () => {
     if (r.ok) {
       $("confirm-msg").textContent = "Cached tiles cleared. ✓";
       $("download").classList.add("hidden");
+      loadJobs();
     } else {
       $("confirm-msg").textContent = "Could not clean up (already gone?).";
     }
@@ -208,6 +210,77 @@ $("confirm").addEventListener("click", async () => {
     $("confirm-msg").textContent = "Cleanup request failed.";
   }
 });
+
+// ---- saved areas menu ----
+const savedLayer = new L.FeatureGroup().addTo(map); // highlight for a picked job
+
+function fmtDate(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  return d.toLocaleString([], { month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit" });
+}
+
+function statusBadge(s) {
+  const map = { done: "✓ done", running: "⏳ fetching", building: "⚙ building Excel",
+    error: "⚠ error", interrupted: "⏸ interrupted", cancelled: "✕ cancelled" };
+  return `<span class="badge b-${s}">${map[s] || s}</span>`;
+}
+
+async function loadJobs() {
+  const ul = $("jobs-list");
+  try {
+    const r = await fetch("/jobs");
+    const jobs = await r.json();
+    if (!jobs.length) { ul.innerHTML = `<li class="muted empty">No saved areas yet.</li>`; return; }
+    ul.innerHTML = "";
+    for (const j of jobs) {
+      const p = j.params || {};
+      const tiles = `${j.cached}/${j.total} tiles cached`;
+      const excel = j.has_xlsx ? `Excel: ${j.xlsx_name}` : "Excel: not built yet";
+      const li = document.createElement("li");
+      li.className = "job";
+      li.innerHTML = `
+        <div class="job-top">
+          ${statusBadge(j.status)}
+          <span class="job-date">${fmtDate(j.created)}</span>
+        </div>
+        <div class="job-box">${p.nw_lat != null
+          ? `NW ${(+p.nw_lat).toFixed(4)}, ${(+p.nw_lon).toFixed(4)} · SE ${(+p.se_lat).toFixed(4)}, ${(+p.se_lon).toFixed(4)}`
+          : "(box unknown)"}</div>
+        <div class="job-meta">${tiles} · ${excel}</div>
+        <div class="job-actions">
+          <button class="linkbtn show">Show on map</button>
+          ${j.has_xlsx ? `<a class="linkbtn" href="/download/${j.job_id}">Download</a>` : ""}
+          <button class="linkbtn danger del">Delete</button>
+        </div>`;
+      li.querySelector(".show").addEventListener("click", () => showJob(p));
+      li.querySelector(".del").addEventListener("click", () => deleteJob(j.job_id));
+      ul.appendChild(li);
+    }
+  } catch (e) {
+    ul.innerHTML = `<li class="muted empty">Could not load saved areas.</li>`;
+  }
+}
+
+function showJob(p) {
+  if (p.nw_lat == null) return;
+  savedLayer.clearLayers();
+  const b = L.latLngBounds([p.se_lat, p.nw_lon], [p.nw_lat, p.se_lon]);
+  L.rectangle(b, { color: "#7a3ea6", weight: 2, dashArray: "5,4", fill: false })
+    .addTo(savedLayer);
+  map.fitBounds(b, { padding: [30, 30] });
+}
+
+async function deleteJob(jobId) {
+  if (!confirm("Delete this area's cached tiles and Excel?")) return;
+  try {
+    await fetch(`/confirm/${jobId}`, { method: "POST" });
+  } catch (e) { /* ignore */ }
+  loadJobs();
+}
+
+$("refresh-jobs").addEventListener("click", loadJobs);
 
 // ---- helpers ----
 function resetOutputs() {
@@ -224,3 +297,6 @@ function showError(msg) {
   el.classList.remove("hidden");
   $("generate").disabled = false;
 }
+
+// populate the saved-areas menu on first load
+loadJobs();

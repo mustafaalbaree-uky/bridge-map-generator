@@ -367,18 +367,25 @@ def confirm(job_id: str):
 
 @app.get("/jobs")
 def list_jobs():
-    """List cached jobs so the user can see/resume interrupted snapshots."""
+    """List remembered jobs: the drawn box, whether tiles are still cached,
+    and what the Excel was saved as. Powers the "Saved areas" menu."""
     out = []
     with _LOCK:
-        for jid, rec in _JOBS.items():
-            out.append({
-                "job_id": jid,
-                "status": rec.get("status"),
-                "done": rec.get("done", 0),
-                "total": rec.get("total", 0),
-                "created": rec.get("created"),
-                "has_xlsx": _xlsx_path(jid).exists(),
-            })
+        recs = list(_JOBS.items())
+    for jid, rec in recs:
+        tdir = _tiles_dir(jid)
+        cached = len(list(tdir.glob("*.png"))) if tdir.exists() else 0
+        out.append({
+            "job_id": jid,
+            "status": rec.get("status"),
+            "done": rec.get("done", 0),
+            "total": rec.get("total", 0),
+            "cached": cached,
+            "created": rec.get("created"),
+            "params": rec.get("params"),          # the drawn box + settings
+            "has_xlsx": _xlsx_path(jid).exists(),
+            "xlsx_name": f"bridge_map_{jid}.xlsx",
+        })
     out.sort(key=lambda r: r.get("created") or 0, reverse=True)
     return out
 
