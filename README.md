@@ -43,7 +43,23 @@ Tiles are written to `jobs/<job_id>/tiles/` **on disk** as they arrive. They are
 
 ---
 
-## Run locally
+## Run it — double-click launcher (easiest)
+
+No commands needed. After getting the folder (clone, or **Code → Download ZIP**
+on GitHub and unzip):
+
+- **Windows:** double-click **`start.bat`**
+- **macOS:** double-click **`start.command`** (first time: right-click → Open to
+  clear the "unidentified developer" warning)
+- **Linux:** run **`./start.sh`**
+
+The first launch creates a Python environment and installs dependencies (a
+minute or two); later launches start in seconds. Your browser opens at
+<http://localhost:8000> automatically. **Leave the terminal window open while you
+use the app — closing it stops the app.** You need Python 3.9+ installed; the
+launcher tells you where to get it if it's missing.
+
+## Run it — manually
 
 ```bash
 python -m venv .venv
