@@ -198,16 +198,16 @@ $("confirm").addEventListener("click", async () => {
   if (!currentJob) return;
   $("confirm").disabled = true;
   try {
-    const r = await fetch(`/confirm/${currentJob}`, { method: "POST" });
+    const r = await fetch(`/clear/${currentJob}`, { method: "POST" });
     if (r.ok) {
-      $("confirm-msg").textContent = "Cached tiles cleared. ✓";
+      $("confirm-msg").textContent = "Cached images cleared — kept under Saved areas. ✓";
       $("download").classList.add("hidden");
       loadJobs();
     } else {
-      $("confirm-msg").textContent = "Could not clean up (already gone?).";
+      $("confirm-msg").textContent = "Could not clear (already gone?).";
     }
   } catch (e) {
-    $("confirm-msg").textContent = "Cleanup request failed.";
+    $("confirm-msg").textContent = "Clear request failed.";
   }
 });
 
@@ -236,8 +236,12 @@ async function loadJobs() {
     ul.innerHTML = "";
     for (const j of jobs) {
       const p = j.params || {};
-      const tiles = `${j.cached}/${j.total} tiles cached`;
-      const excel = j.has_xlsx ? `Excel: ${j.xlsx_name}` : "Excel: not built yet";
+      const tiles = j.cache_cleared && j.cached === 0
+        ? "images cleared"
+        : `${j.cached}/${j.total} tiles cached`;
+      const excel = j.has_xlsx ? `Excel: ${j.xlsx_name}`
+        : j.cache_cleared ? `Excel was: ${j.xlsx_name} (cleared)`
+        : "Excel: not built yet";
       const li = document.createElement("li");
       li.className = "job";
       li.innerHTML = `
@@ -252,10 +256,13 @@ async function loadJobs() {
         <div class="job-actions">
           <button class="linkbtn show">Show on map</button>
           ${j.has_xlsx ? `<a class="linkbtn" href="/download/${j.job_id}">Download</a>` : ""}
+          ${j.cached > 0 ? `<button class="linkbtn clear">Clear cache</button>` : ""}
           <button class="linkbtn danger del">Delete</button>
         </div>`;
       li.querySelector(".show").addEventListener("click", () => showJob(p));
       li.querySelector(".del").addEventListener("click", () => deleteJob(j.job_id));
+      const clearBtn = li.querySelector(".clear");
+      if (clearBtn) clearBtn.addEventListener("click", () => clearJob(j.job_id));
       ul.appendChild(li);
     }
   } catch (e) {
@@ -272,10 +279,18 @@ function showJob(p) {
   map.fitBounds(b, { padding: [30, 30] });
 }
 
-async function deleteJob(jobId) {
-  if (!confirm("Delete this area's cached tiles and Excel?")) return;
+async function clearJob(jobId) {
+  if (!confirm("Clear this area's cached images and Excel? The entry stays in Saved areas.")) return;
   try {
-    await fetch(`/confirm/${jobId}`, { method: "POST" });
+    await fetch(`/clear/${jobId}`, { method: "POST" });
+  } catch (e) { /* ignore */ }
+  loadJobs();
+}
+
+async function deleteJob(jobId) {
+  if (!confirm("Delete this area completely — cached images, Excel, and the saved entry?")) return;
+  try {
+    await fetch(`/jobs/${jobId}`, { method: "DELETE" });
   } catch (e) { /* ignore */ }
   loadJobs();
 }

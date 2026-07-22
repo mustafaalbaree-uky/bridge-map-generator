@@ -43,15 +43,23 @@ Tiles are written to `jobs/<job_id>/tiles/` **on disk** as they arrive. They are
   placement, not the imagery.)
 - Re-submitting a box that's still fetching **attaches to the running job**
   instead of starting a duplicate.
-- Tiles are deleted only when **you confirm the Excel is good** — the
-  "Confirm & clean up cached tiles" button (`POST /confirm/<job_id>`) removes the
-  job's cache.
+
+Two separate ways to reclaim space, so the history sticks around:
+
+- **Clear cache** (`POST /clear/<job_id>`) deletes the heavy files — the cached
+  tile images and the built `.xlsx` — but **keeps the metadata**, so the area
+  stays listed under "Saved areas" (showing its box and the Excel's old name)
+  until you delete it. This is what the post-download button does.
+- **Delete** (`DELETE /jobs/<job_id>`) removes the job **entirely** — images,
+  Excel, and the saved entry.
 
 Smart cleanup of *old* tiles:
 
 - A background sweep removes any job folder untouched for **24h** (`CLEANUP_TTL_S`
   in `app.py`) — a safety net for abandoned jobs.
-- The sweep **never touches a job that's actively fetching or building**.
+- The sweep **never touches a job that's actively fetching or building**, and
+  **never touches a metadata-only (already-cleared) job** — those stay until you
+  delete them by hand.
 - Because the folder's timestamp updates every time a tile lands, a job you're
   actively resuming keeps resetting its own 24h clock.
 
@@ -130,8 +138,9 @@ The DPI (96) matches the print dialog and can be passed to `/export` if needed.
 | `GET` | `/progress/{job_id}` | Server-Sent Events stream of `{done, total, status}`. |
 | `GET` | `/status/{job_id}` | Polling fallback for progress. |
 | `GET` | `/download/{job_id}` | The finished `.xlsx` as an attachment. |
-| `POST` | `/confirm/{job_id}` | Delete the job's cached tiles once you're happy. |
-| `GET` | `/jobs` | List cached jobs (see interrupted snapshots). |
+| `POST` | `/clear/{job_id}` | Delete the cached images + Excel, keep the saved entry. (`/confirm` is a back-compat alias.) |
+| `DELETE` | `/jobs/{job_id}` | Delete the job entirely, including its saved entry. |
+| `GET` | `/jobs` | List remembered areas (box, cache status, Excel name). |
 
 ---
 

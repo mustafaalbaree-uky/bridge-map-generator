@@ -353,11 +353,38 @@ def download(job_id: str):
     )
 
 
+@app.post("/clear/{job_id}")
+def clear_cache(job_id: str):
+    """Delete the HEAVY files (cached tile images + the built .xlsx) to free
+    disk, but KEEP the metadata so the area still shows under "Saved areas"
+    until the user explicitly deletes it."""
+    d = _job_dir(job_id)
+    if not d.exists() and _get(job_id) is None:
+        raise HTTPException(404, "Unknown job.")
+    tdir = _tiles_dir(job_id)
+    if tdir.exists():
+        shutil.rmtree(tdir, ignore_errors=True)
+    xlsx = _xlsx_path(job_id)
+    if xlsx.exists():
+        try:
+            xlsx.unlink()
+        except OSError:
+            pass
+    _set(job_id, cache_cleared=True, done=0)  # keeps/rewrites meta.json
+    return {"ok": True, "cleared": job_id}
+
+
+# Back-compat alias: /confirm now means "clear cache, keep the entry".
 @app.post("/confirm/{job_id}")
 def confirm(job_id: str):
-    """User confirms the Excel is good -> delete the cached tiles + job dir."""
+    return clear_cache(job_id)
+
+
+@app.delete("/jobs/{job_id}")
+def delete_job(job_id: str):
+    """Remove the job entirely — cached tiles, Excel, AND the metadata."""
     d = _job_dir(job_id)
-    if not d.exists():
+    if not d.exists() and _get(job_id) is None:
         raise HTTPException(404, "Unknown job.")
     shutil.rmtree(d, ignore_errors=True)
     with _LOCK:
@@ -385,6 +412,7 @@ def list_jobs():
             "params": rec.get("params"),          # the drawn box + settings
             "has_xlsx": _xlsx_path(jid).exists(),
             "xlsx_name": f"bridge_map_{jid}.xlsx",
+            "cache_cleared": rec.get("cache_cleared", False),
         })
     out.sort(key=lambda r: r.get("created") or 0, reverse=True)
     return out
@@ -400,6 +428,13 @@ def _cleanup_loop():
             # Never sweep a job that's actively fetching or building.
             rec = _get(d.name)
             if rec and rec.get("status") in ("running", "building"):
+                continue
+            # Only sweep jobs that still hold HEAVY files (tiles). A job whose
+            # cache was cleared is metadata-only — keep it until the user
+            # deletes it from "Saved areas".
+            tdir = d / "tiles"
+            has_tiles = tdir.exists() and any(tdir.glob("*.png"))
+            if not has_tiles:
                 continue
             try:
                 age = now - d.stat().st_mtime
