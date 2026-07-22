@@ -1,0 +1,389 @@
+"""
+app.py — FastAPI web service around the proven Bridge-Map -> Excel pipeline.
+
+Flow:
+  * User draws a box on the map (frontend) and POSTs /export.
+  * We plan the tile grid, guard against oversized jobs, and start a background
+    thread that fetches each tile from Esri's print service and writes it to
+    jobs/<job_id>/tiles/ ON DISK. Tiles are CACHED there so an interrupted run
+    resumes from what it already has, and they are NOT deleted automatically —
+    they stay until the user confirms the Excel is good (POST /confirm) or the
+    24h safety sweep removes stale jobs.
+  * Progress streams over SSE at /progress/<job_id>.
+  * The finished .xlsx downloads at /download/<job_id>.
+
+The tile fetch and the openpyxl AbsoluteAnchor placement live in pipeline.py and
+are preserved exactly from the command-line prototype.
+"""
+
+import json
+import os
+import shutil
+import threading
+import time
+import uuid
+from pathlib import Path
+
+import requests
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
+
+import pipeline
+
+# ------------------------------------------------------------------ config ---
+BASE_DIR = Path(__file__).resolve().parent
+JOBS_DIR = BASE_DIR / "jobs"          # persistent tile cache lives here
+STATIC_DIR = BASE_DIR / "static"
+JOBS_DIR.mkdir(exist_ok=True)
+
+MAX_TILES = 200                        # reject jobs larger than this
+MAX_CONCURRENT_JOBS = 2                # cap simultaneous fetching jobs
+TILE_TIMEOUT_S = 240                   # per-tile fetch timeout
+CLEANUP_TTL_S = 24 * 3600              # safety sweep for abandoned jobs
+RETRIES = 3
+PAUSE_S = 0.4
+
+# In-memory progress registry. Each job dir also has meta.json so state survives
+# a server restart (tiles on disk are the real cache; this mirrors it).
+_JOBS = {}
+_LOCK = threading.Lock()
+
+# Cache the web map definition once per process (basemap + bridge layers).
+_WEBMAP_CACHE = {"operational": None, "basemap": None}
+_WEBMAP_LOCK = threading.Lock()
+
+app = FastAPI(title="KYTC Bridge Map -> Excel")
+
+
+# ------------------------------------------------------------- job helpers ---
+def _job_dir(job_id):
+    return JOBS_DIR / job_id
+
+
+def _meta_path(job_id):
+    return _job_dir(job_id) / "meta.json"
+
+
+def _tiles_dir(job_id):
+    return _job_dir(job_id) / "tiles"
+
+
+def _xlsx_path(job_id):
+    return _job_dir(job_id) / "map.xlsx"
+
+
+def _write_meta(job_id):
+    """Persist the in-memory record to disk (best effort)."""
+    rec = _JOBS.get(job_id)
+    if not rec:
+        return
+    try:
+        _meta_path(job_id).write_text(json.dumps(rec))
+    except OSError:
+        pass
+
+
+def _set(job_id, **changes):
+    with _LOCK:
+        rec = _JOBS.setdefault(job_id, {})
+        rec.update(changes)
+    _write_meta(job_id)
+
+
+def _get(job_id):
+    with _LOCK:
+        rec = _JOBS.get(job_id)
+        return dict(rec) if rec else None
+
+
+def _load_jobs_from_disk():
+    """Rehydrate job records from disk so /progress and /download survive a
+    restart. Jobs that were mid-fetch are marked interrupted (their cached
+    tiles remain and can be resumed by re-running the same box)."""
+    for d in JOBS_DIR.glob("*"):
+        if not d.is_dir():
+            continue
+        meta = d / "meta.json"
+        if not meta.exists():
+            continue
+        try:
+            rec = json.loads(meta.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if rec.get("status") == "running":
+            rec["status"] = "interrupted"
+            rec["error"] = "Server restarted while fetching; tiles are cached."
+        _JOBS[d.name] = rec
+
+
+def _running_count():
+    with _LOCK:
+        return sum(1 for r in _JOBS.values() if r.get("status") == "running")
+
+
+def _get_webmap(session):
+    with _WEBMAP_LOCK:
+        if _WEBMAP_CACHE["operational"] is None:
+            op, bm = pipeline.fetch_webmap(session=session)
+            # Log operational layer URLs so the bridge layer can be hardcoded
+            # into the frontend overlay (spec step: "log it so we can hardcode").
+            print(f"[webmap] {len(op)} operational layer(s):")
+            for L in op:
+                print(f"  [webmap]  {L.get('title')!r} -> {L.get('url')}")
+            _WEBMAP_CACHE["operational"] = op
+            _WEBMAP_CACHE["basemap"] = bm
+        return _WEBMAP_CACHE["operational"], _WEBMAP_CACHE["basemap"]
+
+
+# ------------------------------------------------------------ background job --
+def _run_job(job_id, params, plan):
+    tiles_dir = _tiles_dir(job_id)
+    tiles_dir.mkdir(parents=True, exist_ok=True)
+    session = requests.Session()
+
+    try:
+        op, bm = _get_webmap(session)
+    except Exception as e:  # noqa: BLE001
+        _set(job_id, status="error", error=f"Could not load web map: {e}")
+        return
+
+    tile_px = params["tile_px"]
+    dpi = params["dpi"]
+    tile_paths = {}
+    done = 0
+
+    for t in plan["tiles"]:
+        # allow cancellation via status flag
+        cur = _get(job_id)
+        if cur and cur.get("status") == "cancelled":
+            return
+        r, c = t["row"], t["col"]
+        path = tiles_dir / f"tile_r{r}_c{c}.png"
+        if path.exists():  # resume: reuse cached tile
+            tile_paths[(r, c)] = str(path)
+            done += 1
+            _set(job_id, done=done)
+            continue
+        try:
+            im = pipeline.export_tile_with_retries(
+                t, op, bm, tile_px, dpi,
+                retries=RETRIES, pause_s=PAUSE_S, session=session,
+            )
+            im.save(path)
+            tile_paths[(r, c)] = str(path)
+            done += 1
+            _set(job_id, done=done)
+        except Exception as e:  # noqa: BLE001 — keep cached tiles, stop here
+            _set(job_id, status="error",
+                 error=f"Tile r{r} c{c} failed after {RETRIES} tries: {e}. "
+                       f"Cached tiles are kept — re-run to resume.")
+            return
+        time.sleep(PAUSE_S)
+
+    # ---- build the Excel from the cached tiles ----
+    _set(job_id, status="building")
+    try:
+        pipeline.build_workbook(
+            tile_paths, tile_px, params["excel_scale"], str(_xlsx_path(job_id))
+        )
+    except Exception as e:  # noqa: BLE001
+        _set(job_id, status="error", error=f"Excel build failed: {e}")
+        return
+
+    _set(job_id, status="done", done=done)
+
+
+# --------------------------------------------------------------- API models ---
+class ExportRequest(BaseModel):
+    nw_lat: float
+    nw_lon: float
+    se_lat: float
+    se_lon: float
+    scale: float = Field(default=pipeline.DEFAULT_SCALE, gt=0)
+    tile_px: int = Field(default=pipeline.DEFAULT_TILE_PX, gt=0, le=8000)
+    dpi: int = Field(default=pipeline.DEFAULT_DPI, gt=0, le=600)
+    excel_scale: float = Field(default=pipeline.DEFAULT_EXCEL_DISPLAY_SCALE,
+                               gt=0, le=1.0)
+
+
+# ----------------------------------------------------------------- endpoints --
+@app.post("/export")
+def export(req: ExportRequest):
+    # basic geometry sanity
+    if not (-90 <= req.nw_lat <= 90 and -90 <= req.se_lat <= 90):
+        raise HTTPException(400, "Latitude must be between -90 and 90.")
+    if not (-180 <= req.nw_lon <= 180 and -180 <= req.se_lon <= 180):
+        raise HTTPException(400, "Longitude must be between -180 and 180.")
+    if req.nw_lat == req.se_lat or req.nw_lon == req.se_lon:
+        raise HTTPException(400, "The box has zero width or height.")
+
+    plan = pipeline.plan_grid(
+        req.nw_lat, req.nw_lon, req.se_lat, req.se_lon,
+        req.scale, req.tile_px, req.dpi,
+    )
+    if plan["total_tiles"] > MAX_TILES:
+        raise HTTPException(
+            400,
+            f"That box needs {plan['total_tiles']} tiles "
+            f"({plan['nrows']}x{plan['ncols']}), over the {MAX_TILES} cap. "
+            f"Draw a smaller box or raise the scale number.",
+        )
+    if _running_count() >= MAX_CONCURRENT_JOBS:
+        raise HTTPException(
+            429, "The server is busy with other exports. Try again shortly.")
+
+    job_id = uuid.uuid4().hex[:12]
+    _job_dir(job_id).mkdir(parents=True, exist_ok=True)
+    params = {
+        "nw_lat": req.nw_lat, "nw_lon": req.nw_lon,
+        "se_lat": req.se_lat, "se_lon": req.se_lon,
+        "scale": req.scale, "tile_px": req.tile_px,
+        "dpi": req.dpi, "excel_scale": req.excel_scale,
+    }
+    _set(
+        job_id,
+        status="running", done=0, total=plan["total_tiles"],
+        nrows=plan["nrows"], ncols=plan["ncols"],
+        params=params, created=time.time(), error=None,
+    )
+    # strip the heavy tile list before threading — the job recomputes as needed
+    threading.Thread(
+        target=_run_job, args=(job_id, params, plan), daemon=True
+    ).start()
+    return {
+        "job_id": job_id,
+        "ncols": plan["ncols"],
+        "nrows": plan["nrows"],
+        "total_tiles": plan["total_tiles"],
+    }
+
+
+@app.get("/plan")
+def plan_estimate(nw_lat: float, nw_lon: float, se_lat: float, se_lon: float,
+                  scale: float = pipeline.DEFAULT_SCALE,
+                  tile_px: int = pipeline.DEFAULT_TILE_PX,
+                  dpi: int = pipeline.DEFAULT_DPI):
+    """Lightweight grid estimate for the frontend (no network, no job)."""
+    plan = pipeline.plan_grid(nw_lat, nw_lon, se_lat, se_lon, scale, tile_px, dpi)
+    return {
+        "nrows": plan["nrows"], "ncols": plan["ncols"],
+        "total_tiles": plan["total_tiles"], "max_tiles": MAX_TILES,
+        "mpp": plan["mpp"], "tile_m": plan["tile_m"],
+    }
+
+
+@app.get("/progress/{job_id}")
+async def progress(job_id: str):
+    if _get(job_id) is None:
+        raise HTTPException(404, "Unknown job.")
+
+    async def event_gen():
+        import asyncio
+        while True:
+            rec = _get(job_id)
+            if rec is None:
+                yield {"event": "error", "data": json.dumps({"error": "gone"})}
+                return
+            payload = {
+                "done": rec.get("done", 0),
+                "total": rec.get("total", 0),
+                "status": rec.get("status", "unknown"),
+                "error": rec.get("error"),
+            }
+            yield {"data": json.dumps(payload)}
+            if rec.get("status") in ("done", "error", "cancelled"):
+                return
+            await asyncio.sleep(0.5)
+
+    return EventSourceResponse(event_gen())
+
+
+@app.get("/status/{job_id}")
+def status(job_id: str):
+    """Polling fallback for environments where SSE is awkward."""
+    rec = _get(job_id)
+    if rec is None:
+        raise HTTPException(404, "Unknown job.")
+    return {
+        "done": rec.get("done", 0),
+        "total": rec.get("total", 0),
+        "status": rec.get("status"),
+        "error": rec.get("error"),
+    }
+
+
+@app.get("/download/{job_id}")
+def download(job_id: str):
+    rec = _get(job_id)
+    if rec is None:
+        raise HTTPException(404, "Unknown job.")
+    xlsx = _xlsx_path(job_id)
+    if not xlsx.exists():
+        raise HTTPException(409, "The Excel file is not ready yet.")
+    return FileResponse(
+        str(xlsx),
+        media_type="application/vnd.openxmlformats-officedocument."
+                   "spreadsheetml.sheet",
+        filename=f"bridge_map_{job_id}.xlsx",
+    )
+
+
+@app.post("/confirm/{job_id}")
+def confirm(job_id: str):
+    """User confirms the Excel is good -> delete the cached tiles + job dir."""
+    d = _job_dir(job_id)
+    if not d.exists():
+        raise HTTPException(404, "Unknown job.")
+    shutil.rmtree(d, ignore_errors=True)
+    with _LOCK:
+        _JOBS.pop(job_id, None)
+    return {"ok": True, "deleted": job_id}
+
+
+@app.get("/jobs")
+def list_jobs():
+    """List cached jobs so the user can see/resume interrupted snapshots."""
+    out = []
+    with _LOCK:
+        for jid, rec in _JOBS.items():
+            out.append({
+                "job_id": jid,
+                "status": rec.get("status"),
+                "done": rec.get("done", 0),
+                "total": rec.get("total", 0),
+                "created": rec.get("created"),
+                "has_xlsx": _xlsx_path(jid).exists(),
+            })
+    out.sort(key=lambda r: r.get("created") or 0, reverse=True)
+    return out
+
+
+# ----------------------------------------------------------------- cleanup ---
+def _cleanup_loop():
+    while True:
+        now = time.time()
+        for d in list(JOBS_DIR.glob("*")):
+            if not d.is_dir():
+                continue
+            try:
+                age = now - d.stat().st_mtime
+            except OSError:
+                continue
+            if age > CLEANUP_TTL_S:
+                shutil.rmtree(d, ignore_errors=True)
+                with _LOCK:
+                    _JOBS.pop(d.name, None)
+        time.sleep(600)
+
+
+@app.on_event("startup")
+def _startup():
+    _load_jobs_from_disk()
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
+
+
+# static frontend LAST so it doesn't shadow the API routes
+app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

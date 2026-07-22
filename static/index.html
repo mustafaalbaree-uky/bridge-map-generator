@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KYTC Bridge Map → Excel</title>
+
+  <!-- Leaflet + Leaflet.draw + esri-leaflet from CDNs -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>KYTC Bridge Map → Excel</h1>
+    <p class="tagline">
+      Draw a box over Kentucky, generate a seam-perfect Excel of the Bridge
+      Data Miner map to annotate.
+    </p>
+  </header>
+
+  <main>
+    <section class="map-col">
+      <div id="map"></div>
+      <p class="hint">
+        Use the rectangle tool (top-left of the map) to draw your area. Draw
+        again to replace it.
+      </p>
+      <div id="bounds" class="bounds muted">No area drawn yet.</div>
+    </section>
+
+    <aside class="panel">
+      <h2>Settings</h2>
+
+      <label>
+        Map scale
+        <span class="sub">Detail level — lower = more zoomed in. Site default: 6037.</span>
+        <input id="scale" type="number" step="0.000001" value="6037.076507919011" />
+      </label>
+
+      <label>
+        Tile size (pixels)
+        <span class="sub">Pixels per tile side. Site default: 4000.</span>
+        <input id="tile_px" type="number" step="1" value="4000" />
+      </label>
+
+      <label>
+        Excel display scale
+        <span class="sub">1.0 = full size. Lower (e.g. 0.5) for a lighter file; seams stay exact.</span>
+        <input id="excel_scale" type="number" step="0.05" min="0.05" max="1" value="1.0" />
+      </label>
+
+      <div id="estimate" class="estimate muted">Draw a box to estimate tiles.</div>
+
+      <button id="generate" disabled>Generate Excel</button>
+
+      <div id="progress-wrap" class="hidden">
+        <div class="bar"><div id="bar-fill"></div></div>
+        <div id="progress-text" class="muted"></div>
+      </div>
+
+      <div id="result" class="hidden">
+        <a id="download" href="#" class="download-btn">⬇ Download your Excel file</a>
+        <p class="sub">
+          Tiles are cached on the server. When the Excel looks good and
+          complete, confirm to clear them:
+        </p>
+        <button id="confirm" class="secondary">Confirm &amp; clean up cached tiles</button>
+        <div id="confirm-msg" class="muted"></div>
+      </div>
+
+      <div id="error" class="error hidden"></div>
+    </aside>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

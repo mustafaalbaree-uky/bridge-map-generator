@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime tile cache + generated workbooks (per-job, not source)
+jobs/*
+!jobs/.gitkeep
+
+# Prototype scratch output
+anderson_out/
