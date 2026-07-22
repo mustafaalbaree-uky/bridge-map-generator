@@ -16,6 +16,7 @@ The tile fetch and the openpyxl AbsoluteAnchor placement live in pipeline.py and
 are preserved exactly from the command-line prototype.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -235,20 +236,39 @@ def export(req: ExportRequest):
         raise HTTPException(
             429, "The server is busy with other exports. Try again shortly.")
 
-    job_id = uuid.uuid4().hex[:12]
-    _job_dir(job_id).mkdir(parents=True, exist_ok=True)
     params = {
         "nw_lat": req.nw_lat, "nw_lon": req.nw_lon,
         "se_lat": req.se_lat, "se_lon": req.se_lon,
         "scale": req.scale, "tile_px": req.tile_px,
         "dpi": req.dpi, "excel_scale": req.excel_scale,
     }
+    # Deterministic job id from the box + tile-defining settings (NOT excel_scale,
+    # which only affects placement). Same area => same cache folder => an
+    # interrupted run RESUMES from the tiles already on disk instead of
+    # re-downloading them.
+    key = "|".join(str(params[k]) for k in
+                   ("nw_lat", "nw_lon", "se_lat", "se_lon", "scale", "tile_px", "dpi"))
+    job_id = hashlib.sha1(key.encode()).hexdigest()[:12]
+
+    existing = _get(job_id)
+    if existing and existing.get("status") in ("running", "building"):
+        # already in flight — attach to it rather than starting a second thread
+        return {
+            "job_id": job_id, "ncols": existing.get("ncols", plan["ncols"]),
+            "nrows": existing.get("nrows", plan["nrows"]),
+            "total_tiles": existing.get("total", plan["total_tiles"]),
+            "resumed": True,
+        }
+
+    _job_dir(job_id).mkdir(parents=True, exist_ok=True)
     _set(
         job_id,
         status="running", done=0, total=plan["total_tiles"],
         nrows=plan["nrows"], ncols=plan["ncols"],
         params=params, created=time.time(), error=None,
     )
+    cached = len(list(_tiles_dir(job_id).glob("*.png"))) \
+        if _tiles_dir(job_id).exists() else 0
     # strip the heavy tile list before threading — the job recomputes as needed
     threading.Thread(
         target=_run_job, args=(job_id, params, plan), daemon=True
@@ -258,6 +278,8 @@ def export(req: ExportRequest):
         "ncols": plan["ncols"],
         "nrows": plan["nrows"],
         "total_tiles": plan["total_tiles"],
+        "cached": cached,
+        "resumed": cached > 0,
     }
 
 
@@ -367,6 +389,10 @@ def _cleanup_loop():
         now = time.time()
         for d in list(JOBS_DIR.glob("*")):
             if not d.is_dir():
+                continue
+            # Never sweep a job that's actively fetching or building.
+            rec = _get(d.name)
+            if rec and rec.get("status") in ("running", "building"):
                 continue
             try:
                 age = now - d.stat().st_mtime

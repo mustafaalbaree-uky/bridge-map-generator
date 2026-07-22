@@ -34,12 +34,26 @@ and left intact. The web layer never re-implements them in JavaScript.
 Tiles are written to `jobs/<job_id>/tiles/` **on disk** as they arrive. They are
 **cached and kept**, not thrown away:
 
-- If a run is interrupted (crash, restart, a failed tile), the tiles already
-  fetched stay on disk. Re-running resumes from what's there instead of
-  re-downloading.
+- **Each tile is saved the moment it downloads.** Close the app (or lose power)
+  mid-run and everything fetched so far is safe on disk.
+- **The job id is derived from the box + scale + tile size + dpi**, not random.
+  So drawing the *same area* again reuses the *same* cache folder and **resumes**:
+  already-downloaded tiles are skipped, and only the missing ones are fetched.
+  (Changing just the Excel display scale reuses the tiles too — it only affects
+  placement, not the imagery.)
+- Re-submitting a box that's still fetching **attaches to the running job**
+  instead of starting a duplicate.
 - Tiles are deleted only when **you confirm the Excel is good** — the
   "Confirm & clean up cached tiles" button (`POST /confirm/<job_id>`) removes the
-  job's cache. A safety sweep also removes any job dir older than 24h.
+  job's cache.
+
+Smart cleanup of *old* tiles:
+
+- A background sweep removes any job folder untouched for **24h** (`CLEANUP_TTL_S`
+  in `app.py`) — a safety net for abandoned jobs.
+- The sweep **never touches a job that's actively fetching or building**.
+- Because the folder's timestamp updates every time a tile lands, a job you're
+  actively resuming keeps resetting its own 24h clock.
 
 ---
 

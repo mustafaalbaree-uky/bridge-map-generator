@@ -144,7 +144,10 @@ $("generate").addEventListener("click", async () => {
 
   currentJob = data.job_id;
   $("progress-wrap").classList.remove("hidden");
-  setProgress(0, data.total_tiles, "starting…");
+  const startMsg = data.resumed
+    ? `resuming — ${data.cached || ""} tiles already cached…`
+    : "starting…";
+  setProgress(data.cached || 0, data.total_tiles, startMsg);
   streamProgress(data.job_id, data.total_tiles);
 });
 
