@@ -5,6 +5,28 @@
 // ---- element helper ----
 const $ = (id) => document.getElementById(id);
 
+/* -------- light / dark theme toggle (bottom-left) --------
+ * Wired first + independent of the map libraries. The chosen theme is saved in
+ * localStorage and re-applied on load (an inline <head> script sets it before
+ * paint to avoid a flash). */
+(function initTheme() {
+  const btn = $("theme-toggle");
+  if (!btn) return;
+  const root = document.documentElement;
+  const paint = () => {
+    const dark = root.getAttribute("data-theme") === "dark";
+    btn.textContent = dark ? "☀️ Light" : "🌙 Dark";
+  };
+  paint();
+  btn.addEventListener("click", () => {
+    const dark = root.getAttribute("data-theme") === "dark";
+    const next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch (e) {}
+    paint();
+  });
+})();
+
 /* -------- self-update banner --------
  * Wired up FIRST and kept independent of the map libraries, so a slow or
  * blocked map CDN can never leave these buttons dead. */

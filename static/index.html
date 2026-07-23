@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>KYTC Bridge Map → Excel</title>
   <link rel="icon" href="/favicon.ico" sizes="any" />
+  <!-- apply saved theme before paint to avoid a flash of the wrong mode -->
+  <script>
+    try {
+      var t = localStorage.getItem("theme");
+      if (t) document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  </script>
 
   <!-- Leaflet + Leaflet.draw + esri-leaflet from CDNs -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -89,6 +96,8 @@
       </div>
     </aside>
   </main>
+
+  <button id="theme-toggle" class="theme-toggle" title="Toggle light / dark mode">🌙 Dark</button>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
