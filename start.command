@@ -48,7 +48,7 @@ while true; do
   if [ -f .do_update ]; then
     rm -f .do_update
     echo
-    echo "Update downloaded — refreshing and restarting..."
+    echo "Update downloaded - refreshing and restarting..."
     pip install -r requirements.txt
     continue
   fi

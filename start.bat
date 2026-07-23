@@ -50,7 +50,7 @@ REM refresh dependencies (in case the update added any) and relaunch.
 if exist ".do_update" (
   del ".do_update"
   echo.
-  echo Update downloaded — refreshing and restarting...
+  echo Update downloaded - refreshing and restarting...
   python -m pip install -r requirements.txt
   goto run
 )

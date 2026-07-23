@@ -1,12 +1,12 @@
 """
-app.py — FastAPI web service around the proven Bridge-Map -> Excel pipeline.
+app.py - FastAPI web service around the proven Bridge-Map -> Excel pipeline.
 
 Flow:
   * User draws a box on the map (frontend) and POSTs /export.
   * We plan the tile grid, guard against oversized jobs, and start a background
     thread that fetches each tile from Esri's print service and writes it to
     jobs/<job_id>/tiles/ ON DISK. Tiles are CACHED there so an interrupted run
-    resumes from what it already has, and they are NOT deleted automatically —
+    resumes from what it already has, and they are NOT deleted automatically -
     they stay until the user confirms the Excel is good (POST /confirm) or the
     24h safety sweep removes stale jobs.
   * Progress streams over SSE at /progress/<job_id>.
@@ -72,7 +72,7 @@ app = FastAPI(title="KYTC Bridge Map -> Excel")
 
 @app.middleware("http")
 async def _no_cache_static(request, call_next):
-    """Never let the browser cache the app's own HTML/JS/CSS — otherwise after
+    """Never let the browser cache the app's own HTML/JS/CSS - otherwise after
     a self-update it would keep running the old page and mismatch the backend."""
     resp = await call_next(request)
     path = request.url.path
@@ -199,10 +199,10 @@ def _run_job(job_id, params, plan):
             tile_paths[(r, c)] = str(path)
             done += 1
             _set(job_id, done=done)
-        except Exception as e:  # noqa: BLE001 — keep cached tiles, stop here
+        except Exception as e:  # noqa: BLE001 - keep cached tiles, stop here
             _set(job_id, status="error",
                  error=f"Tile r{r} c{c} failed after {RETRIES} tries: {e}. "
-                       f"Cached tiles are kept — re-run to resume.")
+                       f"Cached tiles are kept - re-run to resume.")
             return
         time.sleep(PAUSE_S)
 
@@ -274,7 +274,7 @@ def export(req: ExportRequest):
 
     existing = _get(job_id)
     if existing and existing.get("status") in ("running", "building"):
-        # already in flight — attach to it rather than starting a second thread
+        # already in flight - attach to it rather than starting a second thread
         return {
             "job_id": job_id, "ncols": existing.get("ncols", plan["ncols"]),
             "nrows": existing.get("nrows", plan["nrows"]),
@@ -291,7 +291,7 @@ def export(req: ExportRequest):
     )
     cached = len(list(_tiles_dir(job_id).glob("*.png"))) \
         if _tiles_dir(job_id).exists() else 0
-    # strip the heavy tile list before threading — the job recomputes as needed
+    # strip the heavy tile list before threading - the job recomputes as needed
     threading.Thread(
         target=_run_job, args=(job_id, params, plan), daemon=True
     ).start()
@@ -404,7 +404,7 @@ def confirm(job_id: str):
 
 @app.delete("/jobs/{job_id}")
 def delete_job(job_id: str):
-    """Remove the job entirely — cached tiles, Excel, AND the metadata."""
+    """Remove the job entirely - cached tiles, Excel, AND the metadata."""
     d = _job_dir(job_id)
     if not d.exists() and _get(job_id) is None:
         raise HTTPException(404, "Unknown job.")
@@ -509,7 +509,7 @@ def check_update():
     cur = _local_version()
     try:
         latest = _remote_version()
-    except Exception as e:  # noqa: BLE001 — offline is fine, just no update
+    except Exception as e:  # noqa: BLE001 - offline is fine, just no update
         return {"current": cur, "latest": None,
                 "update_available": False, "error": str(e)}
     return {"current": cur, "latest": latest, "update_available": latest > cur}
@@ -546,7 +546,7 @@ def _cleanup_loop():
             if rec and rec.get("status") in ("running", "building"):
                 continue
             # Only sweep jobs that still hold HEAVY files (tiles). A job whose
-            # cache was cleared is metadata-only — keep it until the user
+            # cache was cleared is metadata-only - keep it until the user
             # deletes it from "Saved areas".
             tdir = d / "tiles"
             has_tiles = tdir.exists() and any(tdir.glob("*.png"))

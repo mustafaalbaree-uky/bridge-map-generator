@@ -1,4 +1,4 @@
-/* KYTC Bridge Map -> Excel — frontend glue.
+/* KYTC Bridge Map -> Excel - frontend glue.
  * Leaflet map + rectangle draw -> POST /export -> SSE progress -> download.
  * The heavy lifting (tile fetch, Excel anchoring) is on the Python backend. */
 
@@ -41,7 +41,7 @@ async function checkUpdate() {
     } else {
       $("update-banner").classList.add("hidden");
     }
-  } catch (e) { /* offline / no backend — leave the banner hidden */ }
+  } catch (e) { /* offline / no backend - leave the banner hidden */ }
 }
 
 async function onUpdateClick() {
@@ -77,7 +77,7 @@ function waitForRestart(target) {
     if (tries > 80) {
       clearInterval(iv);
       $("update-text").textContent =
-        "The restart is taking a while — close the window and open the app again.";
+        "The restart is taking a while - close the window and open the app again.";
     }
   }, 1500);
 }
@@ -196,7 +196,7 @@ async function doEstimate() {
     estEl.innerHTML =
       `<b>${d.total_tiles}</b> tiles (${d.nrows} rows × ${d.ncols} cols) · ` +
       `${d.mpp.toFixed(2)} m/px` +
-      (over ? `<br>⚠ Over the ${d.max_tiles}-tile cap — draw smaller or raise the scale.`
+      (over ? `<br>⚠ Over the ${d.max_tiles}-tile cap - draw smaller or raise the scale.`
             : d.total_tiles > 50 ? `<br>Heads up: large job, this may take a while.` : "");
     genBtn.disabled = over;
   } catch (e) {
@@ -234,7 +234,7 @@ $("generate").addEventListener("click", async () => {
   currentJob = data.job_id;
   $("progress-wrap").classList.remove("hidden");
   const startMsg = data.resumed
-    ? `resuming — ${data.cached || ""} tiles already cached…`
+    ? `resuming - ${data.cached || ""} tiles already cached…`
     : "starting…";
   setProgress(data.cached || 0, data.total_tiles, startMsg);
   streamProgress(data.job_id, data.total_tiles);
@@ -249,7 +249,7 @@ function streamProgress(jobId, total) {
     else if (d.status === "error") { es.close(); showError(d.error || "Export failed."); }
   };
   es.onerror = () => {
-    // SSE dropped — fall back to polling
+    // SSE dropped - fall back to polling
     es.close();
     pollProgress(jobId, total);
   };
@@ -273,7 +273,7 @@ function setProgress(done, total, status) {
   $("bar-fill").style.width = pct + "%";
   const label = status === "building" ? "building Excel…"
     : status === "done" ? "done" : status;
-  $("progress-text").textContent = `${done} / ${total} tiles — ${label}`;
+  $("progress-text").textContent = `${done} / ${total} tiles - ${label}`;
 }
 
 function onDone(jobId) {
@@ -289,7 +289,7 @@ $("confirm").addEventListener("click", async () => {
   try {
     const r = await fetch(`/clear/${currentJob}`, { method: "POST" });
     if (r.ok) {
-      $("confirm-msg").textContent = "Cached images cleared — kept under Saved areas. ✓";
+      $("confirm-msg").textContent = "Cached images cleared - kept under Saved areas. ✓";
       $("download").classList.add("hidden");
       loadJobs();
     } else {
@@ -377,7 +377,7 @@ async function clearJob(jobId) {
 }
 
 async function deleteJob(jobId) {
-  if (!confirm("Delete this area completely — cached images, Excel, and the saved entry?")) return;
+  if (!confirm("Delete this area completely - cached images, Excel, and the saved entry?")) return;
   try {
     await fetch(`/jobs/${jobId}`, { method: "DELETE" });
   } catch (e) { /* ignore */ }

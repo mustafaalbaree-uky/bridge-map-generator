@@ -19,13 +19,13 @@ public print service. For an exact coordinate box we:
 2. Split the box into a grid of tiles in Web Mercator (EPSG:3857). Because every
    tile is the same pixel size at the same scale and each tile's box starts
    exactly where the previous one ended, **tiles abut perfectly by
-   construction** — no eyeballing.
+   construction** - no eyeballing.
 3. POST each tile to Esri's print service (`Export Web Map Task`) to get a PNG.
 4. Place each tile into the `.xlsx` with an `AbsoluteAnchor` at exact EMU pixel
    positions (`1 px = 9525 EMU`), so seams stay perfect regardless of Excel
    column widths.
 
-The tile fetch and the openpyxl anchoring are the hard-won, proven parts — they
+The tile fetch and the openpyxl anchoring are the hard-won, proven parts - they
 live in **`pipeline.py`**, lifted from the command-line prototype (`map_export.py`)
 and left intact. The web layer never re-implements them in JavaScript.
 
@@ -39,33 +39,33 @@ Tiles are written to `jobs/<job_id>/tiles/` **on disk** as they arrive. They are
 - **The job id is derived from the box + scale + tile size + dpi**, not random.
   So drawing the *same area* again reuses the *same* cache folder and **resumes**:
   already-downloaded tiles are skipped, and only the missing ones are fetched.
-  (Changing just the Excel display scale reuses the tiles too — it only affects
+  (Changing just the Excel display scale reuses the tiles too - it only affects
   placement, not the imagery.)
 - Re-submitting a box that's still fetching **attaches to the running job**
   instead of starting a duplicate.
 
 Two separate ways to reclaim space, so the history sticks around:
 
-- **Clear cache** (`POST /clear/<job_id>`) deletes the heavy files — the cached
-  tile images and the built `.xlsx` — but **keeps the metadata**, so the area
+- **Clear cache** (`POST /clear/<job_id>`) deletes the heavy files - the cached
+  tile images and the built `.xlsx` - but **keeps the metadata**, so the area
   stays listed under "Saved areas" (showing its box and the Excel's old name)
   until you delete it. This is what the post-download button does.
-- **Delete** (`DELETE /jobs/<job_id>`) removes the job **entirely** — images,
+- **Delete** (`DELETE /jobs/<job_id>`) removes the job **entirely** - images,
   Excel, and the saved entry.
 
 Smart cleanup of *old* tiles:
 
 - A background sweep removes any job folder untouched for **24h** (`CLEANUP_TTL_S`
-  in `app.py`) — a safety net for abandoned jobs.
+  in `app.py`) - a safety net for abandoned jobs.
 - The sweep **never touches a job that's actively fetching or building**, and
-  **never touches a metadata-only (already-cleared) job** — those stay until you
+  **never touches a metadata-only (already-cleared) job** - those stay until you
   delete them by hand.
 - Because the folder's timestamp updates every time a tile lands, a job you're
   actively resuming keeps resetting its own 24h clock.
 
 ---
 
-## Run it — double-click launcher (easiest)
+## Run it - double-click launcher (easiest)
 
 No commands needed. After getting the folder (clone, or **Code → Download ZIP**
 on GitHub and unzip):
@@ -78,10 +78,10 @@ on GitHub and unzip):
 The first launch creates a Python environment and installs dependencies (a
 minute or two); later launches start in seconds. Your browser opens at
 <http://localhost:8000> automatically. **Leave the terminal window open while you
-use the app — closing it stops the app.** You need Python 3.9+ installed; the
+use the app - closing it stops the app.** You need Python 3.9+ installed; the
 launcher tells you where to get it if it's missing.
 
-## Run it — manually
+## Run it - manually
 
 ```bash
 python -m venv .venv
@@ -112,18 +112,18 @@ Paste the bridge layer URL into `BRIDGE_LAYER_URL` at the top of
 
 ## Automatic updates
 
-The app updates itself from GitHub — users never re-download anything after the
+The app updates itself from GitHub - users never re-download anything after the
 one-time setup.
 
 - On launch (and on page load) the app compares its local `VERSION` to the
   `VERSION` file on GitHub's `main` branch. If GitHub's is newer, a green
   **"A new version is available"** banner appears with an **Update now** button.
 - Clicking it downloads the latest code straight from GitHub, overwrites the
-  app's files, and the launcher restarts the app — reinstalling Python
+  app's files, and the launcher restarts the app - reinstalling Python
   dependencies automatically if the update added any. The page then reloads
   itself into the new version. **Cached tiles, saved areas, and the Python
   environment are left untouched.**
-- If GitHub can't be reached, the check silently does nothing — the app keeps
+- If GitHub can't be reached, the check silently does nothing - the app keeps
   working offline.
 
 The launchers (`start.bat` / `start.command` / `start.sh`) are the one thing the
@@ -137,7 +137,7 @@ that once.
    integer: `1` → `2` → `3` …).
 2. Commit and push to `main`.
 
-That's it. Next time each user opens the app — or reloads the page — they'll see
+That's it. Next time each user opens the app - or reloads the page - they'll see
 the update banner and can pull it in with one click.
 
 ## Settings
@@ -185,7 +185,7 @@ Create a new **Web Service** from this repo:
 - **Start command:** `uvicorn app:app --host 0.0.0.0 --port $PORT`
 
 Render provides `$PORT`. No other configuration is required. Note that on
-Render's ephemeral disk the `jobs/` cache does not survive a redeploy — download
+Render's ephemeral disk the `jobs/` cache does not survive a redeploy - download
 your Excel before redeploying.
 
 ---
@@ -194,7 +194,7 @@ your Excel before redeploying.
 
 ```
 app.py              FastAPI service: endpoints, background jobs, caching, SSE
-pipeline.py         Proven pipeline — grid math, tile fetch, Excel anchoring
+pipeline.py         Proven pipeline - grid math, tile fetch, Excel anchoring
 static/index.html   Draw-a-box map UI
 static/app.js       Map + draw + progress-bar glue
 static/style.css    Styling

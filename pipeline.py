@@ -1,10 +1,10 @@
 """
-pipeline.py — Bridge Data Miner -> seamless map tiles -> Excel.
+pipeline.py - Bridge Data Miner -> seamless map tiles -> Excel.
 
 This is the PROVEN pipeline from the command-line prototype (map_export.py),
 refactored into reusable functions that take parameters instead of module
 globals so the FastAPI backend can drive them. The grid math, the print-service
-fetch, and the openpyxl AbsoluteAnchor placement are preserved exactly — they
+fetch, and the openpyxl AbsoluteAnchor placement are preserved exactly - they
 are the hard-won, seam-perfect parts.
 """
 
@@ -163,7 +163,7 @@ def export_tile_with_retries(tile, operational, basemap, tile_px, dpi,
     for attempt in range(1, retries + 1):
         try:
             return export_tile(tile, operational, basemap, tile_px, dpi, session)
-        except Exception as e:  # noqa: BLE001 — surface after retries exhausted
+        except Exception as e:  # noqa: BLE001 - surface after retries exhausted
             last_err = e
             time.sleep(1.5 * attempt)
     raise RuntimeError(f"tile r{tile['row']} c{tile['col']} failed: {last_err}")
@@ -173,7 +173,7 @@ def export_tile_with_retries(tile, operational, basemap, tile_px, dpi,
 def build_workbook(tile_paths, tile_px, excel_display_scale, out_path):
     """Place each tile with an AbsoluteAnchor at exact EMU pixel positions.
 
-    THIS IS THE CRITICAL, SEAM-PERFECT PART — kept byte-for-byte from the
+    THIS IS THE CRITICAL, SEAM-PERFECT PART - kept byte-for-byte from the
     prototype. Seams are exact and independent of column widths.
 
     ``tile_paths`` maps (row, col) -> filesystem path of an RGB PNG tile.
