@@ -133,7 +133,7 @@ button.secondary {
   border-radius: 6px;
   font-size: 13px;
 }
-.hidden { display: none; }
+.hidden { display: none !important; }
 
 /* update banner */
 .update-banner {

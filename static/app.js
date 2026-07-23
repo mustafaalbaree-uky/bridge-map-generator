@@ -2,6 +2,74 @@
  * Leaflet map + rectangle draw -> POST /export -> SSE progress -> download.
  * The heavy lifting (tile fetch, Excel anchoring) is on the Python backend. */
 
+// ---- element helper ----
+const $ = (id) => document.getElementById(id);
+
+/* -------- self-update banner --------
+ * Wired up FIRST and kept independent of the map libraries, so a slow or
+ * blocked map CDN can never leave these buttons dead. */
+async function checkUpdate() {
+  try {
+    const r = await fetch("/check-update", { cache: "no-store" });
+    const d = await r.json();
+    if (d && d.update_available) {
+      $("update-text").textContent =
+        `🔄 A new version is available (v${d.current} → v${d.latest}).`;
+      $("update-banner").classList.remove("hidden");
+    } else {
+      $("update-banner").classList.add("hidden");
+    }
+  } catch (e) { /* offline / no backend — leave the banner hidden */ }
+}
+
+async function onUpdateClick() {
+  $("update-btn").disabled = true;
+  $("update-dismiss").classList.add("hidden");
+  $("update-text").textContent =
+    "⏳ Updating… the app will restart itself. Please wait, don't close the window.";
+  let d;
+  try {
+    const r = await fetch("/update", { method: "POST" });
+    d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "update failed");
+  } catch (e) {
+    $("update-text").textContent =
+      "Update failed: " + e.message + " (you can keep using the current version).";
+    $("update-btn").disabled = false;
+    $("update-dismiss").classList.remove("hidden");
+    return;
+  }
+  if (!d.updated) { $("update-banner").classList.add("hidden"); return; }
+  waitForRestart(d.to);
+}
+
+function waitForRestart(target) {
+  let tries = 0;
+  const iv = setInterval(async () => {
+    tries++;
+    try {
+      const r = await fetch("/version", { cache: "no-store" });
+      const v = (await r.json()).version;
+      if (v >= target) { clearInterval(iv); location.reload(true); }
+    } catch (e) { /* server still restarting */ }
+    if (tries > 80) {
+      clearInterval(iv);
+      $("update-text").textContent =
+        "The restart is taking a while — close the window and open the app again.";
+    }
+  }, 1500);
+}
+
+(function wireUpdateUI() {
+  const banner = $("update-banner");
+  if (!banner) return;
+  const dismiss = $("update-dismiss");
+  const btn = $("update-btn");
+  if (dismiss) dismiss.addEventListener("click", () => banner.classList.add("hidden"));
+  if (btn) btn.addEventListener("click", onUpdateClick);
+  checkUpdate();
+})();
+
 // Optional: overlay the KYTC bridge feature layer so users draw around the
 // flags they actually see. The backend logs the operational layer URLs from
 // the web map on first fetch ("[webmap] ... -> <url>"); paste that URL here to
@@ -72,7 +140,6 @@ function showBounds() {
 }
 
 // ---- controls ----
-const $ = (id) => document.getElementById(id);
 const getSettings = () => ({
   scale: parseFloat($("scale").value),
   tile_px: parseInt($("tile_px").value, 10),

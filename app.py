@@ -70,6 +70,17 @@ _WEBMAP_LOCK = threading.Lock()
 app = FastAPI(title="KYTC Bridge Map -> Excel")
 
 
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    """Never let the browser cache the app's own HTML/JS/CSS — otherwise after
+    a self-update it would keep running the old page and mismatch the backend."""
+    resp = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        resp.headers["Cache-Control"] = "no-store, must-revalidate"
+    return resp
+
+
 # ------------------------------------------------------------- job helpers ---
 def _job_dir(job_id):
     return JOBS_DIR / job_id
