@@ -40,7 +40,19 @@ echo.
 echo Starting the app... your browser will open at http://localhost:8000
 echo Leave this window open. Close it when you're done to stop the app.
 echo.
+if exist ".do_update" del ".do_update"
 start "" http://localhost:8000
+
+:run
 python -m uvicorn app:app --host 127.0.0.1 --port 8000
+REM If the app applied an update it leaves a .do_update flag and exits; then we
+REM refresh dependencies (in case the update added any) and relaunch.
+if exist ".do_update" (
+  del ".do_update"
+  echo.
+  echo Update downloaded — refreshing and restarting...
+  python -m pip install -r requirements.txt
+  goto run
+)
 
 pause

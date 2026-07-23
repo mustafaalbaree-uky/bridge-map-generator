@@ -35,5 +35,18 @@ echo
 echo "Starting the app... open http://localhost:8000 in your browser."
 echo "Leave this terminal open. Close it when you're done to stop the app."
 echo
+[ -f .do_update ] && rm -f .do_update
 ( sleep 2; xdg-open "http://localhost:8000" >/dev/null 2>&1 ) &
-python -m uvicorn app:app --host 127.0.0.1 --port 8000
+
+while true; do
+  python -m uvicorn app:app --host 127.0.0.1 --port 8000
+  # If the app applied an update it leaves a .do_update flag and exits.
+  if [ -f .do_update ]; then
+    rm -f .do_update
+    echo
+    echo "Update downloaded — refreshing and restarting..."
+    pip install -r requirements.txt
+    continue
+  fi
+  break
+done

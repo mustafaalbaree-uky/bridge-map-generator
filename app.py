@@ -40,6 +40,17 @@ JOBS_DIR = BASE_DIR / "jobs"          # persistent tile cache lives here
 STATIC_DIR = BASE_DIR / "static"
 JOBS_DIR.mkdir(exist_ok=True)
 
+# ---- self-update (pulls new code from GitHub on the user's click) ----
+REPO_SLUG = "mustafaalbaree-uky/bridge-map-generator"
+UPDATE_BRANCH = "main"
+VERSION_FILE = BASE_DIR / "VERSION"
+RAW_VERSION_URL = f"https://raw.githubusercontent.com/{REPO_SLUG}/{UPDATE_BRANCH}/VERSION"
+ZIP_URL = f"https://codeload.github.com/{REPO_SLUG}/zip/refs/heads/{UPDATE_BRANCH}"
+UPDATE_SENTINEL = BASE_DIR / ".do_update"   # launcher watches this to restart
+# Never overwrite/replace these during an update (runtime data, env, launchers).
+UPDATE_SKIP = {".venv", "jobs", ".git", ".do_update", "__pycache__",
+               "start.bat", "start.command", "start.sh"}
+
 MAX_TILES = 200                        # reject jobs larger than this
 MAX_CONCURRENT_JOBS = 2                # cap simultaneous fetching jobs
 TILE_TIMEOUT_S = 240                   # per-tile fetch timeout
@@ -416,6 +427,100 @@ def list_jobs():
         })
     out.sort(key=lambda r: r.get("created") or 0, reverse=True)
     return out
+
+
+# ------------------------------------------------------------- self-update ---
+def _local_version():
+    try:
+        return int(VERSION_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return 0
+
+
+def _remote_version(timeout=15):
+    r = requests.get(RAW_VERSION_URL, timeout=timeout)
+    r.raise_for_status()
+    return int(r.text.strip())
+
+
+def _copy_tree(src, dst):
+    for item in src.iterdir():
+        if item.name in UPDATE_SKIP:
+            continue
+        target = dst / item.name
+        if item.is_dir():
+            target.mkdir(exist_ok=True)
+            _copy_tree(item, target)
+        else:
+            shutil.copy2(item, target)
+
+
+def _apply_update():
+    """Download the repo ZIP from GitHub and overwrite the app's own files.
+    Runtime data (jobs/, .venv/) and the launchers are left untouched."""
+    import tempfile
+    import zipfile
+    r = requests.get(ZIP_URL, timeout=180)
+    r.raise_for_status()
+    tmp = Path(tempfile.mkdtemp(prefix="bmg_update_"))
+    try:
+        zpath = tmp / "src.zip"
+        zpath.write_bytes(r.content)
+        xdir = tmp / "x"
+        with zipfile.ZipFile(zpath) as z:
+            z.extractall(xdir)
+        roots = [p for p in xdir.iterdir() if p.is_dir()]
+        if not roots:
+            raise RuntimeError("downloaded archive was empty")
+        _copy_tree(roots[0], BASE_DIR)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _schedule_restart(delay=1.5):
+    """Signal the launcher to restart us, then exit hard so it takes over."""
+    UPDATE_SENTINEL.write_text("restart")
+
+    def _bye():
+        time.sleep(delay)
+        os._exit(0)
+
+    threading.Thread(target=_bye, daemon=True).start()
+
+
+@app.get("/version")
+def version():
+    return {"version": _local_version()}
+
+
+@app.get("/check-update")
+def check_update():
+    cur = _local_version()
+    try:
+        latest = _remote_version()
+    except Exception as e:  # noqa: BLE001 — offline is fine, just no update
+        return {"current": cur, "latest": None,
+                "update_available": False, "error": str(e)}
+    return {"current": cur, "latest": latest, "update_available": latest > cur}
+
+
+@app.post("/update")
+def update():
+    cur = _local_version()
+    try:
+        latest = _remote_version()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not reach GitHub to check for updates: {e}")
+    if latest <= cur:
+        return {"ok": True, "updated": False, "version": cur,
+                "message": "Already up to date."}
+    try:
+        _apply_update()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Update download/apply failed: {e}")
+    _schedule_restart()
+    return {"ok": True, "updated": True, "restarting": True,
+            "from": cur, "to": latest}
 
 
 # ----------------------------------------------------------------- cleanup ---

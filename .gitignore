@@ -9,3 +9,6 @@ jobs/*
 
 # Prototype scratch output
 anderson_out/
+
+# Self-update restart flag (runtime only)
+.do_update

@@ -110,6 +110,36 @@ Paste the bridge layer URL into `BRIDGE_LAYER_URL` at the top of
 
 ---
 
+## Automatic updates
+
+The app updates itself from GitHub — users never re-download anything after the
+one-time setup.
+
+- On launch (and on page load) the app compares its local `VERSION` to the
+  `VERSION` file on GitHub's `main` branch. If GitHub's is newer, a green
+  **"A new version is available"** banner appears with an **Update now** button.
+- Clicking it downloads the latest code straight from GitHub, overwrites the
+  app's files, and the launcher restarts the app — reinstalling Python
+  dependencies automatically if the update added any. The page then reloads
+  itself into the new version. **Cached tiles, saved areas, and the Python
+  environment are left untouched.**
+- If GitHub can't be reached, the check silently does nothing — the app keeps
+  working offline.
+
+The launchers (`start.bat` / `start.command` / `start.sh`) are the one thing the
+auto-updater deliberately does **not** overwrite (a running launcher can't
+safely replace itself). They rarely change; if one ever must, re-send the folder
+that once.
+
+### Shipping an update (maintainer)
+
+1. Make your changes and **bump the number in the `VERSION` file** (it's a plain
+   integer: `1` → `2` → `3` …).
+2. Commit and push to `main`.
+
+That's it. Next time each user opens the app — or reloads the page — they'll see
+the update banner and can pull it in with one click.
+
 ## Settings
 
 | Control | Default | Meaning |
@@ -141,6 +171,9 @@ The DPI (96) matches the print dialog and can be passed to `/export` if needed.
 | `POST` | `/clear/{job_id}` | Delete the cached images + Excel, keep the saved entry. (`/confirm` is a back-compat alias.) |
 | `DELETE` | `/jobs/{job_id}` | Delete the job entirely, including its saved entry. |
 | `GET` | `/jobs` | List remembered areas (box, cache status, Excel name). |
+| `GET` | `/version` | The app's current build number. |
+| `GET` | `/check-update` | Compares local vs GitHub `VERSION`; reports if an update exists. |
+| `POST` | `/update` | Downloads + applies the latest code, then restarts. |
 
 ---
 
